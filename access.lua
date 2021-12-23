@@ -2,27 +2,18 @@
 -- skip favicon
 local block = ""
 
-
 if ngx.var.uri == "/favicon.ico" then return ngx.location.capture(ngx.var.uri) end
 ngx.log(ngx.INFO, block, "################################################################################")
 
 -- import requirements
 local cjson = require("cjson")
-local https = require("ssl.https")
-local url = require("socket.url")
-local ltn12 = require("ltn12")
+local httpc = require("resty.http").new()
 
 local github_uri = "https://github.com"
 local github_api_uri = "https://api.github.com"
 
 ngx.log(ngx.INFO, block, "Using github_uri="..github_uri)
 ngx.log(ngx.INFO, block, "Using github_api_uri="..github_api_uri)
-
-local function pt(t)
-  s = ""
-  for k,v in pairs(t) do s=s.."("..k..","..v.."), " end
-  ngx.log(ngx.INFO, block, s)
-end
 
 -- TODO: make this an oauth lib
 -- note that org names are case-sensitive
@@ -40,25 +31,21 @@ local oauth = {
 oauth.authorize_url = oauth.authorize_base_url.."?client_id="..oauth.app_id.."&scope="..oauth.scope
 
 function oauth.request(url_string, method)
-    local result_table = {}
+    local res, err = httpc:request_uri(url_string, {
+        method = method,
+        headers = {
+            ["Accept"] = "application/json",
+        },
+    })
 
-    local url_table = {
-      url = url.build(url.parse(url_string, {port = 443})),
-      method = method,
-      sink = ltn12.sink.table(result_table),
-      headers = {
-        ["accept"] = "application/json"
-      }
-    }
+    if not res then
+        ngx.log(ngx.ERR, "oauth2 request failed: ", err)
+        return
+    end
 
-    local body, code, headers, status_line = https.request(url_table)
+    ngx.log(ngx.INFO, block, "body::", res.body)
 
-    local json_body = ""
-    for i, value in ipairs(result_table) do json_body = json_body .. value end
-
-    ngx.log(ngx.INFO, block, "body::", json_body)
-
-    return {body=cjson.decode(json_body), status=code, headers=headers}
+    return {body=cjson.decode(res.body), status=res.status, headers=res.headers}
 end
 
 function oauth.get(url_string)
